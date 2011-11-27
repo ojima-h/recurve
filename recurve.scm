@@ -1,0 +1,120 @@
+(define PI (acos -1))
+
+(define-syntax define-object
+  (syntax-rules ()
+    ((_ type (ivs ...) (method args . body) ...)
+     (define type
+       (lambda (ivs ...)
+         (list (quote type)
+               (lambda (message . arguments)
+                 (case message
+                   ((quote method) (apply (lambda args . body) arguments)) ...))))))))
+(define-syntax $
+  (syntax-rules ()
+    ((_ object method . args)
+     ((list-ref object 1) (quote method) . args))))
+(define-syntax is_a?
+  (syntax-rules ()
+    ((_ type object)
+     (and (pair? object)
+          (eq? (list-ref object 0) (quote type))))))
+
+(define-object point (x y)
+  (x () x)
+  (y () y)
+  (display () (print "(" x ", " y ")")))
+(define-object vector (b e)
+  (begin () b)
+  (end () e)
+  (dir () (list (- ($ e x) ($ b x)) (- ($ e y) ($ b y))))
+  (shift args
+         (apply (lambda (x y)
+                  (vector (point (+ ($ b x) x) (+ ($ b y) y))
+                          (point (+ ($ e x) x) (+ ($ e y) y))))
+                (cond ((= (length args) 2) args)
+                      ((= (length args) 1) ($ (list-ref args 0) dir))
+                      (else (list 0 0)))))
+  (resize (ratio)
+          (let ((dir-x (- ($ e x) ($ b x)))
+                (dir-y (- ($ e y) ($ b y))))
+            (vector b
+                    (point (+ ($ b x) (* dir-x ratio))
+                           (+ ($ b y) (* dir-y ratio))))))
+  (rotate (theta)
+          (let ((dir-x (- ($ e x) ($ b x)))
+                (dir-y (- ($ e y) ($ b y))))
+            (vector b
+                    (point (+ ($ b x) (- (* (cos theta) dir-x) (* (sin theta) dir-y)))
+                           (+ ($ b y) (+ (* (sin theta) dir-x) (* (cos theta) dir-y)))))))
+  (display ()
+           (print "(" ($ b x) " , " ($ b y) ") -> (" ($ e x) " , " ($ e y) ")")))
+(define (coch-gen vec)
+  (let* ((v1 ($ vec resize (/ 1 3.)))
+         (v2 ($ ($ v1 rotate (/ PI 3.)) shift v1))
+         (v3 ($ ($ ($ v1 rotate (/ PI -3.)) shift v1) shift v2))
+         (v4 ($ ($ v1 shift v1) shift v1)))
+    (list v1 v2 v3 v4)))
+
+;
+; Normal Tree Version
+;
+(define-object leaf (value)
+  (value () value))
+(define-object tree (children)
+  (children () children))
+
+(define (tree-fold tree-kons tree-knil tree)
+  (if (is_a? leaf tree)
+      (tree-knil tree)
+      (tree-kons (map (lambda (t) (tree-fold tree-kons tree-knil t))
+                      ($ tree children)))))
+(define (tree-unfold seed tree-kchildren tree-knil pred)
+  (if (pred seed)
+      (tree-knil seed)
+      (tree (map (lambda (t) (tree-unfold t tree-kchildren tree-knil pred))
+                 (tree-kchildren seed)))))
+(define (tree-each proc tree)
+  (tree-fold (lambda (children))
+             (lambda (leaf) (proc leaf))
+             tree))
+
+(define (recurve generator depth init)
+  (tree-unfold (list init depth)
+               (lambda (s)
+                 (map (lambda (v) (list v (- (list-ref s 1) 1)))
+                      (generator (list-ref s 0))))
+               (lambda (s) (leaf (list-ref s 0)))
+               (lambda (s) (= 0 (list-ref s 1)))))
+
+
+;
+; Lazy Tree Version
+;
+(define-object lleaf (value)
+  (value () value))
+(define-object ltree (children)
+  (children () (map force children))
+  (raw () children))
+
+(define (ltree-fold tree-kons tree-knil tree)
+  (if (is_a? leaf tree)
+      (tree-knil tree)
+      (tree-kons (map (lambda (t) (tree-fold tree-kons tree-knil t))
+                      ($ tree children)))))
+(define (ltree-unfold seed tree-kchildren tree-knil pred)
+  (if (pred seed)
+      (tree-knil seed)
+      (ltree (map (lambda (t) (lazy (ltree-unfold t tree-kchildren tree-knil pred)))
+                  (tree-kchildren seed)))))
+(define (ltree-each proc tree)
+  (ltree-fold (lambda (children))
+              (lambda (leaf) (proc leaf))
+              tree))
+
+(define (lazy-recurve generator depth init)
+  (ltree-unfold (list init depth)
+                (lambda (s)
+                  (map (lambda (v) (list v (- (list-ref s 1) 1)))
+                       (generator (list-ref s 0))))
+                (lambda (s) (leaf (list-ref s 0)))
+                (lambda (s) (= 0 (list-ref s 1)))))
